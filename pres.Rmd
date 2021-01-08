@@ -1,0 +1,353 @@
+---
+title: "Introduction to table.glue"
+author: "Byron C. Jaeger^[University of Alabama at Birmingham, bcjaeger@uab.edu]"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: tango
+    theme: readable
+    toc: yes
+    toc_float: yes
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+
+library(table.glue, warn.conflicts = FALSE)
+library(glue,       warn.conflicts = FALSE)
+library(dplyr,      warn.conflicts = FALSE)
+library(tibble,     warn.conflicts = FALSE)
+library(tidyr,      warn.conflicts = FALSE)
+library(gt,         warn.conflicts = FALSE)
+library(flextable,  warn.conflicts = FALSE)
+
+```
+
+# Overview
+
+This vignette shows how to go from data to table using the `table.glue` package and complementary packages such as `gt` and `flextable`.  
+
+Here are the topics it covers: 
+
+- Why use `table.glue`?
+
+- Core `table.glue` functions
+
+- How to customize `table.glue` 
+
+- A grammar of tables
+
+
+# Why use `table.glue`?
+
+`table.glue` gives you more control over the presentation of your data. It 
+
+- allows you to round, format, and store your data in ways that simplify reporting. 
+
+- introduces a grammar for tabulation that scales comfortably into complex projects. 
+
+- safely works in the context of any R package that makes a table using a dataset (`gt`, `flextable`, `kable`).
+
+## Example
+
+Suppose we want to write a summary statement about the mean and standard deviation (SD) of a variable.
+
+### Use base R
+
+The classic approach is to use base R functions `format`, `round`, and `paste`:
+
+```{r}
+
+# made up numbers
+col_mean <- 20.09062
+col_sd <- 6.026948
+
+# round to three significant digits
+col_mean_pretty <- format(signif(col_mean, digits = 2), nsmall = 0)
+col_sd_pretty <- format(signif(col_sd, digits = 2), nsmall = 1)
+
+# write the string presenting the data
+paste0("The mean (SD) is ", col_mean_pretty, " (", col_sd_pretty, ") ")
+
+```
+
+This gets the job done! Still, the code may be a little hard to read for a user who isn't a grizzled `paste()` veteran. This is where the `glue` package is really useful. 
+
+### Use `glue()`
+
+Instead of using `paste()`, `glue()` lets us write everything in one string, surrounding R object with curly brackets (i.e., "look at this {`R object`}" ) tells R that the `glue()` function should print the value of that R object rather than the raw string. For instance,  
+
+```{r}
+
+glue("the mean (SD) is {col_mean_pretty} ({col_sd_pretty})")
+
+```
+
+This is more readable and clean than `paste()`. The only thing `glue()` doesn't do is make the pretty versions of `col_mean` and `col_sd`. This is where `table.glue` comes in.
+
+### Use `table_glue()`
+
+The `table.glue` package lets you use `glue()` without having to make numbers pretty beforehand. For example, the code below uses `table_glue()`, one of the main functions in `table.glue`, to replicate the results we got from `glue()` but without using the pretty versions of `col_mean` and `col_sd`. 
+
+```{r example}
+
+# notice that we are not using 'pretty' versions of col_mean and col_sd
+table_glue("the mean (SD) is {col_mean} ({col_sd})")
+
+```
+
+# Core `table.glue` functions
+
+- `table_glue()`: functions exactly like `glue()` but also applies rounding and formatting rules to numeric values in the input string.
+
+- `table_value()`: applies rounding and formatting rules to a numeric input (i.e., use this if you don't want to write a string)
+
+- `round_spec()` creates a specification for rounding that can be customized and plugged in to `table_glue()`.
+
+- `as_inline()`: transforms flat data into a nested list (this is very useful; you will see why soon).
+
+# How to customize `table.glue` 
+
+When you call a function like `table_glue()` or `table_value()`, you may supply your own rounding specification or use a default rounding specification. You can make your own specification using the `round_` family of functions:
+
+```{r}
+
+rspec <- round_spec() %>%  # creates a new rounding specification
+  round_half_even() %>% # round halves to the nearest even option
+  round_using_decimal(digits = 4) # round everything to 4 digits
+
+```
+
+Now you can use the default rounding specification or your own.
+
+```{r}
+
+table_value(3.141593)
+
+table_value(3.141593, rspec = rspec)
+
+```
+
+
+# A grammar of tables
+
+`table.glue` holds manuscripts together using a simple data structure to hold your tabulated data: the nested list. This creates an R object that is straightforward and satisfying to use. Instead of saying why this is useful, we'll demonstrate its usefulness with an example analyzing data from The US National Health and Nutrition Examination Survey (NHANES), 2013-2018. 
+
+## NHANES 
+
+NHANES was designed to assess the health and nutritional status of the non-institutionalized US population and was conducted by the National Center for Health Statistics of the Centers for Disease Control and Prevention. Since 1999-2000, NHANES has been conducted in two-year cycles using a multistage probability sampling design to select participants. Each cycle is independent with different participants recruited.
+
+__Blood pressure (BP)__: The same protocol was followed to measure systolic and diastolic BP (SBP and DBP) in each NHANES cycle. After survey participants had rested 5 minutes, their BP was measured by a trained physician using a mercury sphygmomanometer and an appropriately sized cuff. Three BP measurements were obtained at 30 second intervals.
+
+```{r}
+
+# see ?table.glue::nhanes for description of all columns
+
+glimpse(nhanes)
+
+```
+
+## Making the analysis data
+
+We will make a table showing SBP and DBP for subgroups based on sex and race over the three NHANES cycles in `nhanes`. But first need to filter to include rows where the survey participant
+
+- completed both the NHANES interview and exam
+
+- is 20 years or older
+
+- is not pregnant
+
+- is currently using medication to lower their BP
+
+- does not have missing data for SBP or DBP
+
+```{r}
+
+nhanes_analysis <- nhanes %>% 
+  as_tibble() %>% 
+  filter(exam_status == 'interview and exam', 
+         age >= 20, 
+         pregnant == 'no' | is.na(pregnant),
+         meds_bp == 'yes') %>% 
+  select(exam, sex, race_ethnicity, bp_sys_mmhg, bp_dia_mmhg) %>% 
+  drop_na()
+
+nhanes_analysis
+
+```
+
+## Making the summary data
+
+For each NHANES exam and sex/race/ethnicity group, we would like to compute the mean and standard deviation of BP. We'll use `dplyr` for this.
+
+```{r}
+
+nhanes_bp_summary <- nhanes_analysis %>% 
+  group_by(exam, sex, race_ethnicity) %>% 
+  summarize(
+    across(
+      .cols = c(bp_sys_mmhg, bp_dia_mmhg),
+      .fns = list(
+        mean = ~ mean(.x),
+        sd = ~ sd(.x)
+      )
+    )
+  )
+
+nhanes_bp_summary[1:10, ]
+
+```
+
+## Making the summary strings
+
+With our summary data, we can now create the data that will be passed to our table. This is where `table.glue` comes into the picture.
+
+```{r}
+
+rspec <- round_spec() %>% 
+  round_half_even() %>% 
+  round_using_magnitude(
+    digits = c(2, 1,  1,   0),
+    breaks = c(1, 10, 100, Inf)
+  )
+
+nhanes_bp_strings <- ungroup(nhanes_bp_summary) %>% 
+  transmute(
+    exam,
+    sex, 
+    race_ethnicity,
+    sbp = table_glue("{bp_sys_mmhg_mean} ({bp_sys_mmhg_sd})", rspec=rspec),
+    dbp = table_glue("{bp_dia_mmhg_mean} ({bp_dia_mmhg_sd})", rspec=rspec)
+  )
+
+nhanes_bp_strings[1:10, ]
+
+```
+
+## Making the table object
+
+Making a table out of `nhanes_tbl_strings` is fairly straightforward, but does require a fair bit of code to recode variables and label things. 
+
+```{r}
+
+nhanes_bp_table <- nhanes_bp_strings %>% 
+  mutate(
+    race_ethnicity = recode(
+      race_ethnicity,
+      'hispanic' = "Mexican American",
+      'asian' = "Non-Hispanic Asian",
+      'black' = "Non-Hispanic Black",
+      'white' = "Non-Hispanic White",
+      'other' = "Other Race - Including Multi-Racial"
+    ),
+    sex = recode(
+      sex, 
+      'female' = 'Female survey participants', 
+      'male' = 'Male survey participants'
+    ),
+    exam = recode(
+      exam,
+      'exam_2013_2014' = '2013-2014',
+      'exam_2015_2016' = '2015-2016',
+      'exam_2017_2018' = '2017-2018'
+    )
+  ) %>%
+  pivot_wider(names_from = 'exam',
+              values_from = c('sbp', 'dbp')) %>% 
+  gt(rowname_col = 'race_ethnicity', 
+     groupname_col = 'sex') %>% 
+  cols_label(
+    "sbp_2013-2014" = "2013-2014",
+    "sbp_2015-2016" = "2015-2016",
+    "sbp_2017-2018" = "2017-2018",
+    "dbp_2013-2014" = "2013-2014",
+    "dbp_2015-2016" = "2015-2016",
+    "dbp_2017-2018" = "2017-2018"
+  ) %>% 
+  cols_align('center') %>% 
+  tab_stubhead(label = 'Race / ethnicity') %>% 
+  tab_spanner(label = 'Systolic BP, mm Hg',
+              columns = c("sbp_2013-2014",
+                          "sbp_2015-2016",
+                          "sbp_2017-2018")) %>% 
+  tab_spanner(label = 'Diastolic BP, mm Hg',
+              columns = c("dbp_2013-2014",
+                          "dbp_2015-2016",
+                          "dbp_2017-2018")) %>% 
+  tab_header(
+    title = "Systolic and diastolic blood pressure for female and male participants in the US National Health and Nutrition Examination Survey from 2013 - 2018", 
+    subtitle = "Table values are mean (standard deviation)"
+  )
+
+nhanes_bp_table
+
+```
+
+## Making the inline object
+
+Now we just need to summarize the table, which can be done using an inline table object. Just like the table, our inline object is created using `nhanes_bp_strings`
+
+```{r}
+
+nhanes_bp_inline <- nhanes_bp_strings %>% 
+  as_inline(tbl_variables = c('exam', 'sex', 'race_ethnicity'),
+            tbl_value = c('sbp', 'dbp'))
+
+# Now you can freely access any cell in the table
+nhanes_bp_inline$exam_2013_2014$male$black$sbp
+nhanes_bp_inline$exam_2017_2018$male$black$sbp 
+
+```
+
+## Using the inline object
+
+This part is easy: "Among survey participants who were black and female, the mean (standard deviation) of systolic blood pressure increased from `r nhanes_bp_inline$exam_2013_2014$female$black$sbp` in 2013-2014 to `r nhanes_bp_inline$exam_2017_2018$female$black$sbp` in 2017-2018."
+
+But what if you don't want to report the standard deviations? These are helpful in the table but less so in the text. To get rid of these, you can use the bracket helper functions, e.g., `bracket_drop()` and `bracket_extract()`. 
+
+
+```{r}
+
+# Drop the bracket
+bracket_drop(nhanes_bp_inline$exam_2013_2014$male$black$sbp)
+# Get the bracket
+bracket_extract(nhanes_bp_inline$exam_2017_2018$male$black$sbp)
+
+```
+
+Let's re-write our sentence more directly: "Among survey participants who were black and female, the mean systolic blood pressure increased from `r bracket_drop(nhanes_bp_inline$exam_2013_2014$female$black$sbp)` mm Hg in 2013-2014 to `r bracket_drop(nhanes_bp_inline$exam_2017_2018$female$black$sbp)` mm Hg in 2017-2018."
+
+The use of inline objects as nested lists scales nicely to more complex analyses where you have multiple tables and perhaps figures that you want to reference in your text. For example, if you have two tables and you want to make them both accessible in one inline object, all you need to do is:
+
+```{r}
+
+# just make a duplicate of the first inline object for demo purpose
+tbl_1 <- nhanes_bp_inline
+tbl_2 <- nhanes_bp_inline 
+
+inline <- list(table_1 = tbl_1, table_2 = tbl_2)
+
+```
+
+
+# Summary
+
+This vignette has covered: 
+
+1. Why you would want to use `table.glue`
+
+1. How to use `table.glue` for rounding and formatting
+
+1. How `table.glue` provides a grammar to simplify writing manuscripts in Rmarkdown.
+
+Thanks for listening! Please send any questions you have about using `table.glue` to me at bcjaeger@uab.edu or file an issue at https://github.com/bcjaeger/table.glue/issues
